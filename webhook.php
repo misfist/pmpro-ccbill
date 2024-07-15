@@ -1,7 +1,7 @@
 <?php
 
 //set this in your wp-config.php for debugging
-//define( 'PMPRO_CCBILL_DEBUG', true );
+//define( 'PMPRO_CCBILL_DEBUG', 'log' );
 
 global $wpdb, $gateway_environment, $logstr;
 
