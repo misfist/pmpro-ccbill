@@ -1,7 +1,7 @@
 <?php
 
 //set this in your wp-config.php for debugging
-//define( 'PMPRO_CCBILL_DEBUG', true );
+//define( 'PMPRO_CCBILL_DEBUG', 'log' );
 
 global $wpdb, $gateway_environment, $logstr;
 
@@ -29,8 +29,11 @@ if ( empty( $response['clientAccnum'] ) || $response['clientAccnum'] !== get_opt
 	pmpro_ccbill_Exit();
 }
 
-// Full reference of event types and responses:
-// https://ccbill.com/doc/webhooks-overview
+/**
+ * CCBill Webhook Events
+ * 
+ * @see https://ccbill.com/doc/webhooks-overview#webhooks_events
+ */
 switch ( $event_type ) {
 
 	case 'NewSaleSuccess':
@@ -49,19 +52,15 @@ switch ( $event_type ) {
 		
 	break;
 
-	case 'Expiration':
 	case 'Cancellation':
-		
-		$subscription_id = sanitize_text_field( $response['subscriptionId'] );
-		
-		$morder = new MemberOrder();
-		$morder->getLastMemberOrderBySubscriptionTransactionID( $subscription_id );
-		$morder->getMembershipLevel();
-		$morder->getUser();
-		
-		if(pmpro_ccbill_RecurringCancel($morder))
-			pmpro_ccbill_Exit();
-	break;
+		pmpro_ccbill_Cancellation( $response );
+		pmpro_ccbill_Exit();
+		break;
+
+	case 'Expiration':
+		pmpro_ccbill_Expiration( $response );
+		pmpro_ccbill_Exit();
+		break;
 
 	case 'RenewalSuccess':
 		$status = 'success';
@@ -223,7 +222,7 @@ function pmpro_ccbill_ChangeMembershipLevel( $response, $morder ) {
 }
 
 /**
- * Add Renewal Order
+ * Handle Renewal
  *
  * @param  array  $response
  * @param  string $status
@@ -268,6 +267,8 @@ function pmpro_ccbill_AddRenewal( array $response, $status = 'success' ) : void 
 
 		// Log the user email only for security reasons.
 		pmpro_ccbill_webhook_log( 'WP User Email: ' . json_encode( $user->user_email ) );
+
+		pmpro_ccbill_webhook_log( 'Incoming Timestamp: ' . json_encode( $timestamp ) );
 
 		// Create a new order now.
 		$order = new MemberOrder();
@@ -320,6 +321,8 @@ function pmpro_ccbill_AddRenewal( array $response, $status = 'success' ) : void 
 		// Save the order before sending the email.
 		$order->saveOrder();
 
+		pmpro_ccbill_webhook_log( 'Timestamp After Save: ' . json_encode( $order->timestamp ) );
+
 		if ( $order->id ) {
 			$order->getMemberOrderByID( $order->id );
 
@@ -345,23 +348,108 @@ function pmpro_ccbill_AddRenewal( array $response, $status = 'success' ) : void 
 
 }
 
-function pmpro_ccbill_RecurringCancel( $morder ) {
-
+/**
+ * Handle Cancellation
+ * 
+ * @see https://ccbill.com/doc/webhooks-user-guide#ftoc-heading-23
+ *
+ * @param  array  $response
+ * @param  string $status
+ * @return boolean
+ */
+function pmpro_ccbill_Cancellation( array $response ) : void {
 	global $pmpro_error;
-	$worked = pmpro_cancelMembershipLevel( $morder->membership_level->id, $morder->user_id, 'inactive' );
 
-	if ( $worked === true ) {
-		//send an email to the member
-		$myemail = new PMProEmail();
-		$myemail->sendCancelEmail();
-		//send an email to the admin
-		$myemail = new PMProEmail();
-		$myemail->sendCancelAdminEmail( $morder->user, $morder->membership_level->id );
+	$subscription_id = sanitize_text_field( $response['subscriptionId'] );
 		
-		pmpro_ccbill_webhook_log( sprintf( __( "Subscription Cancelled (%s)", 'pmpro-ccbill'), $morder->csubscription_transaction_id ) );
+	$morder = new MemberOrder();
+	$morder->getLastMemberOrderBySubscriptionTransactionID( $subscription_id );
+
+	$update_status = $morder->updateStatus( 'cancelled' );
+	
+	if( $update_status ) {
+		// $email = new PMProEmail();
+		// $email->sendCancelEmail( $morder->user, $morder->membership_level->id );
+		
+		$email = new PMProEmail();
+		$email->sendCancelAdminEmail( $morder->user, $morder->membership_level->id );
+		
+		pmpro_ccbill_webhook_log( sprintf( __( "Subscription Cancelled (%s)", 'pmpro-ccbill' ), $subscription_id ) );
+	} else {
+		pmpro_ccbill_webhook_log( sprintf( __( "Subscription Cancellation (%s) failed.", 'pmpro-ccbill' ), $subscription_id ) );
+	}
+}
+
+/**
+ * Handle Expiration
+ * 
+ * @see https://ccbill.com/doc/webhooks-user-guide#ftoc-heading-24
+ *
+ * @param  array $response
+ * @return void
+ */
+function pmpro_ccbill_Expiration( array $response ) {
+	$subscription_id = sanitize_text_field( $response['subscriptionId'] );
+	$morder = new MemberOrder();
+	$morder->getLastMemberOrderBySubscriptionTransactionID( $subscription_id );
+
+	$subscription_cancelled = pmpro_ccbill_SubscriptionCancel( $subscription_id );
+	$membership_cancelled = pmpro_ccbill_MembershipCancel( $morder );
+}
+
+/**
+ * Cancel Subscription
+ *
+ * @param  int  $subscription_id
+ * @return boolean
+ */
+function pmpro_ccbill_SubscriptionCancel( $subscription_id ) : bool {
+	global $pmpro_error;
+
+	$morder = new MemberOrder();
+	$morder->getLastMemberOrderBySubscriptionTransactionID( $subscription_id );
+
+	$updated = $morder->updateStatus( 'cancelled' );
+	
+	if( $updated ) {
+		// $email = new PMProEmail();
+		// $email->sendCancelEmail( $morder->user, $morder->membership_level->id );
+		
+		// $email = new PMProEmail();
+		// $email->sendCancelAdminEmail( $morder->user, $morder->membership_level->id );
+		
+		pmpro_ccbill_webhook_log( sprintf( __( "Subscription Cancelled (%s)", 'pmpro-ccbill' ), $subscription_id ) );
 
 		return true;
 	} else {
+		pmpro_ccbill_webhook_log( sprintf( __( "Subscription Cancellation (%s) failed.", 'pmpro-ccbill' ), $subscription_id ) );
+
+		return false;
+	}
+}
+
+/**
+ * Cancel Membership
+ *
+ * @param  object MemberOrder $morder
+ * @return bool
+ */
+function pmpro_ccbill_MembershipCancel( $morder ) : bool {
+	global $pmpro_error;
+
+	$cancelled = pmpro_cancelMembershipLevel( $morder->membership_level->id, $morder->user_id, 'inactive' );
+
+	if( $cancelled ) {
+		$email = new PMProEmail();
+		$email->sendCancelEmail( $morder->user, $morder->membership_level->id );
+
+		pmpro_ccbill_webhook_log( sprintf( __( "Membership Cancelled (%s) for (%s)", 'pmpro-ccbill' ), $morder->membership_level->id, $morder->user_id ) );
+
+		return true;
+
+	} else {
+		pmpro_ccbill_webhook_log( sprintf( __( "Membership Cancellation (%s) failed for (%s)", 'pmpro-ccbill' ), $morder->membership_level->id, $morder->user_id ) );
+
 		return false;
 	}
 }
