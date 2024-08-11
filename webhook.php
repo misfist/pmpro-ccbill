@@ -272,7 +272,7 @@ function pmpro_ccbill_AddRenewal( array $response, $status = 'success' ) : void 
 		// Log the user email only for security reasons.
 		pmpro_ccbill_webhook_log( 'WP User Email: ' . json_encode( $user->user_email ) );
 
-		pmpro_ccbill_webhook_log( 'Incoming Timestamp: ' . json_encode( $timestamp ) );
+		pmpro_ccbill_webhook_log( 'Timestamp Sent: ' . json_encode( $timestamp ) );
 
 		// Create a new order now.
 		$order = new MemberOrder();
@@ -325,7 +325,7 @@ function pmpro_ccbill_AddRenewal( array $response, $status = 'success' ) : void 
 		// Save the order before sending the email.
 		$order->saveOrder();
 
-		pmpro_ccbill_webhook_log( 'Timestamp After Save: ' . json_encode( $order->timestamp ) );
+		pmpro_ccbill_webhook_log( 'Timestamp After saveOrder: ' . json_encode( $order->timestamp ) );
 
 		if ( $order->id ) {
 			$order->getMemberOrderByID( $order->id );
