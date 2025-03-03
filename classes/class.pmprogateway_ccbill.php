@@ -777,6 +777,9 @@ class PMProGateway_CCBill extends PMProGateway {
 				$update_array['status'] = 'active';
 			} else {
 				$update_array['status'] = 'cancelled';
+				if ( isset( $data['cancelDate'] ) && ! empty( $data['cancelDate'] ) ) {
+					$update_array['enddate'] = date( 'Y-m-d H:i:s', strtotime( $data['cancelDate'] ) );
+				}
 			}
 		}
 
@@ -787,12 +790,6 @@ class PMProGateway_CCBill extends PMProGateway {
 
 		if ( isset( $data['expirationDate'] ) && ! empty( $data['expirationDate'] ) ) {
 			$update_array['next_payment_date'] = date( 'Y-m-d H:i:s', strtotime( $data['expirationDate'] ) );
-		}
-
-		if ( isset( $data['cancelDate'] ) && ! empty( $data['cancelDate'] ) ) {
-			if ( $status_code < 2 ) { // Only set end date if cancelled
-				$update_array['enddate'] = date( 'Y-m-d H:i:s', strtotime( $data['cancelDate'] ) );
-			}
 		}
 
 		// Update subscription object
